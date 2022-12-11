@@ -306,25 +306,31 @@ class Trie {
 
     std::unique_ptr<TrieNode>* currentNode=&root_;
     int len=key.size();
+    latch_.WLock();
     for(int i=0;i<len-1;++i){
-      if(!root_->GetChildNode(key[i])){
+      if(!(*currentNode)->GetChildNode(key[i])){
         (*currentNode)->InsertChildNode(key[i],std::make_unique<TrieNode>(key[i]));
       }
-      currentNode=&((*currentNode)->GetChildNode(key[i]));
+      currentNode=(*currentNode)->GetChildNode(key[i]);
     }
 
     char lastCh=key.back();
+    //key does not exits
     if(!(*currentNode)->GetChildNode(lastCh)){
-      (*currentNode)->InsertChildNode(lastCh,std::make_unique<TrieNodeWithValue>(lastCh,value));
+      (*currentNode)->InsertChildNode(lastCh,std::make_unique<TrieNodeWithValue<T>>(lastCh,value));
     }else{
+      //key exists but not an end
       if(!(*(*currentNode)->GetChildNode(lastCh))->IsEndNode()){
         (*(*currentNode)->GetChildNode(lastCh))->SetEndNode(true);
       }
+      //key already exists
       else{
+        latch_.WUnlock();
         return false;
       }
     }
 
+    latch_.WUnlock();
     return true;
   }
 
@@ -345,7 +351,34 @@ class Trie {
    * @param key Key used to traverse the trie and find the correct node
    * @return True if the key exists and is removed, false otherwise
    */
-  bool Remove(const std::string &key) { return false; }
+  bool Remove(const std::string &key) {
+    std::vector<std::unique_ptr<TrieNode>*> ancestors;
+    std::unique_ptr<TrieNode>* currentNode=&root_;
+    ancestors.push_back(currentNode);
+    int len=key.size();
+    latch_.WLock();
+    for(int i=0;i<len;++i){
+      if(!(*currentNode)->HasChild(key[i])){
+        latch_.WUnlock();
+        return false;
+      }
+      currentNode=(*currentNode)->GetChildNode(key[i]);
+      ancestors.push_back(currentNode);
+    }
+
+    (*currentNode)->SetEndNode(false);
+
+    for(int i=len;i>0;--i){
+      if(!(*ancestors[i])->IsEndNode()&&!(*ancestors[i])->HasChildren()){
+        ((*ancestors[i-1])->RemoveChildNode((*ancestors[i])->GetKeyChar()));
+      }else{
+        break;
+      }
+    }
+
+    latch_.WUnlock();
+    return true;
+  }
 
   /**
    * TODO(P0): Add implementation
@@ -367,8 +400,29 @@ class Trie {
    */
   template <typename T>
   T GetValue(const std::string &key, bool *success) {
-    *success = false;
-    return {};
+    std::unique_ptr<TrieNode>* currentNode=&root_;
+    int len=key.size();
+    latch_.RLock();
+    for(int i=0;i<len;++i){
+      if(!(*currentNode)->HasChild(key[i])){
+        *success=false;
+        latch_.RUnlock();
+        return {};
+      }
+      currentNode=(*currentNode)->GetChildNode(key[i]);
+    }
+
+    TrieNodeWithValue<T>* p=dynamic_cast<TrieNodeWithValue<T>*>((*currentNode).get());
+    if(!p){
+      *success=false;
+      latch_.RUnlock();
+      return {};
+    }
+    else{
+      *success=true;
+      latch_.RUnlock();
+      return p->GetValue();
+    }
   }
 };
 }  // namespace bustub
