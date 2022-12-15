@@ -78,7 +78,48 @@ auto ExtendibleHashTable<K, V>::Remove(const K &key) -> bool {
 
 template <typename K, typename V>
 void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
-  UNREACHABLE("not implemented");
+  size_t bucket_index=IndexOf(key);
+  if(dir_[bucket_index]->Find(key,value)){
+    return;
+  }
+
+  if(!dir_[bucket_index]->isFull()){
+    dir_[bucket_index]->Insert(key,value);
+    return;
+  }
+
+  if(GetLocalDepth(bucket_index)==GetGlobalDepth()){
+    ++global_depth_;
+    dir_[bucket_index]->IncrementDepth();
+    dir_.resize(1<<global_depth_);
+    int mask=(1<<(global_depth_-1))-1;
+    for(int i=1<<(global_depth_-1);i<dir_.size();++i){
+      if((i&mask)==bucket_index){
+        std::shared_ptr<Bucket> split_bucket=std::make_shared<Bucket>(bucket_size_,dir_[bucket_index]->GetDepth());
+        RedistributeBucket(dir_[bucket_index],split_bucket,bucket_index);
+        split_bucket->Insert(key,value);
+      } else{
+        dir_[i]=dir_[i&mask];
+      }
+    }
+  } else{
+    dir_[bucket_index]->IncrementDepth();
+    std::shared_ptr<Bucket> split_bucket=std::make_shared<Bucket>(bucket_size_,dir_[bucket_index]->GetDepth());
+    RedistributeBucket(dir_[bucket_index],split_bucket,bucket_index);
+    split_bucket->Insert(key,value);
+  }
+}
+
+template <typename K, typename V>
+void ExtendibleHashTable<K, V>::RedistributeBucket(std::shared_ptr<ExtendibleHashTable<K, V>::Bucket> src_bucket,std::shared_ptr<ExtendibleHashTable<K, V>::Bucket> dst_bucket,int index){
+  int mask=1<<src_bucket->GetDepth();
+  dir_[index&mask]=dst_bucket;
+  for(const auto &[k,v]:src_bucket->GetItems()){
+    if(std::hash<K>()(k)&mask){
+      dst_bucket->Insert(k,v);
+      src_bucket->Remove(k);
+    }
+  }
 }
 
 //===--------------------------------------------------------------------===//
