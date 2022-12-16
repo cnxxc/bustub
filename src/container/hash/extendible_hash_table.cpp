@@ -23,7 +23,11 @@ namespace bustub {
 
 template <typename K, typename V>
 ExtendibleHashTable<K, V>::ExtendibleHashTable(size_t bucket_size)
-    : global_depth_(0), bucket_size_(bucket_size), num_buckets_(1) {}
+    : global_depth_(0), bucket_size_(bucket_size), num_buckets_(1) {
+      for(int i=0;i<num_buckets_;++i) {
+        dir_.push_back(std::make_shared<Bucket>(bucket_size));
+      }
+    }
 
 template <typename K, typename V>
 auto ExtendibleHashTable<K, V>::IndexOf(const K &key) -> size_t {
@@ -79,11 +83,12 @@ auto ExtendibleHashTable<K, V>::Remove(const K &key) -> bool {
 template <typename K, typename V>
 void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
   size_t bucket_index=IndexOf(key);
-  if(dir_[bucket_index]->Find(key,value)){
+  V temp_value;
+  if(dir_[bucket_index]->Find(key,temp_value)){
     return;
   }
 
-  if(!dir_[bucket_index]->isFull()){
+  if(!dir_[bucket_index]->IsFull()){
     dir_[bucket_index]->Insert(key,value);
     return;
   }
@@ -92,12 +97,12 @@ void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
     ++global_depth_;
     dir_[bucket_index]->IncrementDepth();
     dir_.resize(1<<global_depth_);
-    int mask=(1<<(global_depth_-1))-1;
-    for(int i=1<<(global_depth_-1);i<dir_.size();++i){
+    size_t mask=(1<<(global_depth_-1))-1;
+    for(size_t i=1<<(global_depth_-1);i<dir_.size();++i){
       if((i&mask)==bucket_index){
         std::shared_ptr<Bucket> split_bucket=std::make_shared<Bucket>(bucket_size_,dir_[bucket_index]->GetDepth());
         RedistributeBucket(dir_[bucket_index],split_bucket,bucket_index);
-        split_bucket->Insert(key,value);
+        Insert(key,value);
       } else{
         dir_[i]=dir_[i&mask];
       }
@@ -106,19 +111,24 @@ void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
     dir_[bucket_index]->IncrementDepth();
     std::shared_ptr<Bucket> split_bucket=std::make_shared<Bucket>(bucket_size_,dir_[bucket_index]->GetDepth());
     RedistributeBucket(dir_[bucket_index],split_bucket,bucket_index);
-    split_bucket->Insert(key,value);
+    Insert(key,value);
   }
 }
 
 template <typename K, typename V>
-void ExtendibleHashTable<K, V>::RedistributeBucket(std::shared_ptr<ExtendibleHashTable<K, V>::Bucket> src_bucket,std::shared_ptr<ExtendibleHashTable<K, V>::Bucket> dst_bucket,int index){
-  int mask=1<<src_bucket->GetDepth();
-  dir_[index&mask]=dst_bucket;
+void ExtendibleHashTable<K, V>::RedistributeBucket(std::shared_ptr<ExtendibleHashTable<K, V>::Bucket> &src_bucket,std::shared_ptr<ExtendibleHashTable<K, V>::Bucket> &dst_bucket,int index){
+  int mask=1<<(src_bucket->GetDepth()-1);
+  dir_[index|mask]=dst_bucket;
+  std::vector<std::pair<K,V>> pairs_to_distribute;
   for(const auto &[k,v]:src_bucket->GetItems()){
     if(std::hash<K>()(k)&mask){
-      dst_bucket->Insert(k,v);
-      src_bucket->Remove(k);
-    }
+      pairs_to_distribute.push_back({k,v});
+    } 
+  }
+
+  for(const auto &[k,v]:pairs_to_distribute){
+    dst_bucket->Insert(k,v);
+    src_bucket->Remove(k);
   }
 }
 
@@ -165,7 +175,7 @@ auto ExtendibleHashTable<K, V>::Bucket::Insert(const K &key, const V &value) -> 
     }
   }
 
-  list_.emplace_back({key,value});
+  list_.emplace_back(key,value);
   return true;
 }
 
